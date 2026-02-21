@@ -473,30 +473,26 @@ def when_command(message):
 def help_command(message):
     help_text = """
 🚀 Available Commands:
-- /start - Get started with a welcome message!
-- /help - Discover all the available commands.
-- /bgmi <target> <port> <duration> - Launch an attack.
-- /deploy - Deploy Clodways repo to all VPS (Owner only)
-- /stop_all - Stop all running attacks. (Owner only)
-- /when - Check the remaining time for current attacks.
-- /grant <user_id> <duration> - Grant access.
-- /revoke <user_id> - Revoke access.
-- /attack_limit <user_id> <max_duration> - Set max attack duration (Owner only).
-- /status - Check your subscription status.
-- /list_users - List all users with access (Owner only).
-- /backup - Backup user access data (Owner only).
-- /download_backup - Download user data (Owner only).
-- /set_cooldown <user_id> <minutes> - Set a user's cooldown time (Owner only).
 
-Usage Notes:
-- Threads fixed at 900.
-- For assistance, contact the owner.
+• /start - Welcome message
+• /help - This help
+• /bgmi <target> <port> <duration> - Launch attack
+• /deploy - Deploy Clodways to all VPS (Owner only)
+• /stop_all - Stop all attacks (Owner only)
+• /when - Show active attacks
+• /grant <user_id> <duration> - Grant access (Owner only)
+• /revoke <user_id> - Revoke access (Owner only)
+• /attack_limit <user_id> <max_duration> - Set max duration (Owner only)
+• /status - Check your subscription
+• /list_users - List all users (Owner only)
+• /backup - Backup data (Owner only)
+• /download_backup - Download backup (Owner only)
+• /set_cooldown <user_id> <minutes> - Set cooldown (Owner only)
+
+Threads fixed at 900.
+For assistance contact owner.
     """
-    try:
-        bot.reply_to(message, help_text, parse_mode='HTML')
-    except telebot.apihelper.ApiTelegramException as e:
-        logging.error(f"Telegram API error: {e}")
-        bot.reply_to(message, "🚨 An error occurred while processing your request. Please try again later.")
+    bot.reply_to(message, help_text)
 
 @bot.message_handler(commands=['grant'])
 def grant_command(message):
@@ -523,7 +519,7 @@ def grant_command(message):
             days = int(duration_str)
             delta = datetime.timedelta(days=days)
         else:
-            reply = bot.reply_to(message, "Invalid duration format! Use a number followed by 'd' for days or 'h' for hours.")
+            reply = bot.reply_to(message, "Invalid duration format! Use number + d/h")
             Timer(10, lambda: bot.delete_message(reply.chat.id, reply.message_id)).start()
             return
     except ValueError:
