@@ -404,9 +404,10 @@ def handle_bgmi(message):
         return
     int_port = int(port)
     BLOCKED_PORTS = {17000, 17500, 20000, 20001, 20002}
-    if int_port <= 10000 or int_port >= 30000 or int_port in BLOCKED_PORTS:
-         bot.reply_to(message, f"🚫 The port `{int_port}` is blocked! Please use a different port.")
-         return
+    if str(caller_id) != OWNER_ID:  # Owner bypasses all port restrictions
+        if int_port <= 10000 or int_port >= 30000 or int_port in BLOCKED_PORTS:
+            bot.reply_to(message, f"🚫 The port `{int_port}` is blocked! Please use a different port.")
+            return
     if duration > MAX_ATTACK_DURATION:
         bot.reply_to(message, f"⚠️ Maximum attack duration is {MAX_ATTACK_DURATION} seconds.")
         return
