@@ -29,15 +29,7 @@ def load_vps_list():
         with open(VPS_FILE, "r") as f:
             return json.load(f)
     except:
-        return [
-            {"ip": "65.20.70.198", "user": "master_mbnctmgpjj", "pass": "jssZ92MddczG"},
-            {"ip": "157.245.106.235", "user": "master_sympfvcjnr", "pass": "j983URh4HZDK"},
-            {"ip": "159.65.155.247", "user": "master_yydznrgycm", "pass": "xPg9tbtjfnE2"},
-            {"ip": "143.110.181.25", "user": "master_kyzpmyacyh", "pass": "BvTwxDPF3jCd"},
-            {"ip": "64.227.164.0", "user": "master_ajtsdszfcj", "pass": "DJcMV2MFQ33y"},
-            {"ip": "64.227.167.67", "user": "master_vqqahptdae", "pass": "48zuz4AZ3XTR"},
-            {"ip": "139.59.63.135", "user": "master_cznykhvwqj", "pass": "jzk66JcCrYW7"}
-        ]
+        return []
 
 def save_vps_list():
     with open(VPS_FILE, "w") as f:
@@ -49,20 +41,25 @@ def deploy_single_vps(vps):
     try:
         ssh = paramiko.SSHClient()
         ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        ssh.connect(vps['ip'], username=vps['user'], password=vps['pass'], timeout=20)
+        ssh.connect(vps['ip'], username=vps['user'], password=vps['pass'], timeout=30)
         
         commands = [
-            "rm -rf \~/Clodways",
-            "git clone https://github.com/SagarExe/Clodways.git \~/Clodways",
-            "cd \~/Clodways && chmod +x *"
+            # Ubuntu 24.04: update package list and install git non-interactively
+            "export DEBIAN_FRONTEND=noninteractive && apt-get update -y",
+            "export DEBIAN_FRONTEND=noninteractive && apt-get install -y git",
+            # Clean old clone and fresh pull
+            "rm -rf ~/Clodways",
+            "git clone https://github.com/SagarExe/Clodways.git ~/Clodways",
+            "cd ~/Clodways && chmod +x *"
         ]
         
         for cmd in commands:
-            ssh.exec_command(cmd)
-            time.sleep(2)
+            stdin, stdout, stderr = ssh.exec_command(cmd)
+            stdout.channel.recv_exit_status()  # wait for each command to finish
+            time.sleep(1)
         
         ssh.close()
-        logging.info(f"✅ Fresh deploy done on {vps['ip']}")
+        logging.info(f"✅ Fresh deploy done on {vps['ip']} (Ubuntu 24.04)")
     except Exception as e:
         logging.error(f"Deploy error on {vps['ip']}: {e}")
 
